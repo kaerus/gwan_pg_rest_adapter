@@ -1,0 +1,88 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          TrustLeap G-WAN Webserver
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: TrustLeap G-WAN initscript
+# Description:       This initiscript starts and stops TrustLeap G-WAN
+### END INIT INFO
+ 
+# Original author: Thomas Meitz, gwan at jproxx dot com
+# Modified by: Anders Elo, at kaerus dot com
+# Version: 1.3
+# Note: Modify GROUP & USER to set process ownership.
+#       Set GWAN_PATH to where gwan is installed.
+ 
+# Process group and user id                                                                                                                    
+GROUP="www"                                                                                                                                    
+USER="www" 
+ 
+# Binary name
+NAME=gwan
+ 
+# Path to binary
+GWAN_PATH=/opt/gwan
+ 
+# Fullpath
+GWAN=$GWAN_PATH/$NAME
+ 
+. /lib/lsb/init-functions
+ 
+[ -x "$GWAN" ] || exit 0
+ 
+# Version string
+DESC=$($GWAN -v 2>&1|tr -d '\n')
+ 
+if test $GROUP ;then GUID=":$GROUP";fi
+if test $USER ; then GUID="$GUID:$USER";fi
+ 
+start() {
+  log_daemon_msg "Starting $DESC"
+  $GWAN -d$GUID
+  RET=$?
+  if [ $RET != 0 ]; then
+    echo "error $ret"
+    log_end $RET 
+    exit $RET 
+  fi
+}
+ 
+stop() {
+  log_daemon_msg "Stopping $DESC"
+  $GWAN -k > /dev/null 2>&1
+  RET=$?
+  if [ $RET != 0 ]; then
+    log_end $RET
+    exit $RET
+  fi
+}
+ 
+case "$1" in
+  start)
+     start 
+     ;;
+  stop)
+     stop
+     ;;
+  status)
+     pids=`pidof $GWAN`
+     if test $? -eq 0 
+       then echo "running pid: $pids"
+       else echo "not running"
+     fi
+     ;;
+  restart)
+     stop
+     start
+     echo "restarted"
+     ;;
+  version)
+     echo $DESC
+     ;;
+  *)
+     echo "Usage: {start|status|restart|stop|version}" >&2
+     exit 3
+     ;;
+esac

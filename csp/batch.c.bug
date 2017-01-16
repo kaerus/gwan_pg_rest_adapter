@@ -1,0 +1,61 @@
+/* 
+ * Copyright (c) 2015 Kaerus Software AB, all rights reserved.
+ * Author Anders Elo <anders @ kaerus com>.
+ *
+ * Licensed under Propreitary Software License terms, (the "License");
+ * you may not use this file unless you have obtained a License.
+ * You can obtain a License by contacting < contact @ kaerus com >. 
+ *
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#pragma link "libraries/postrest/db.c"
+#pragma link "libraries/libpq/libpq.so"
+#pragma include "/usr/local/pgsql/include/"
+
+#include <string.h>
+
+#include "gwan.h"
+#include "postrest/db.h"
+
+int batch_jobs(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
+    
+    debug_printf("create batch job\n");
+    
+    return 201;
+}
+
+int main(int argc, char **argv){
+    int method = get_env(argv, REQUEST_METHOD);
+    xbuf_t *req = get_request(argv);
+    xbuf_t *rep = get_reply(argv);
+    db_t *db = db_session(argv);
+    
+    if(!db) {
+        return db_error(rep,HTTP_401_UNAUTHORIZED,"authentication failed");
+    }
+
+    char *q = argv[0];
+            
+    if(!q || q[0] == 0) {
+        return db_error(rep,HTTP_400_BAD_REQUEST,"no such command");
+    }
+    
+    switch(method) {
+        case HTTP_GET: {            
+           
+        } break;
+        case HTTP_POST: {
+            return batch_jobs(argc,argv,req,rep,db);
+        } break;
+        case HTTP_DELETE: {
+           
+        } break;
+        case HTTP_PUT: {
+           
+        } break;
+        default: break;
+    }
+    
+    return db_error(rep,HTTP_405_METHOD_NOT_ALLOWED,"method not allowed");
+}
