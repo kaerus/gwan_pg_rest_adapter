@@ -2,22 +2,21 @@
  * Copyright (c) 2015 Kaerus Software AB, all rights reserved.
  * Author Anders Elo <anders @ kaerus com>.
  *
- * Licensed under Propreitary Software License terms, (the "License");
- * you may not use this file unless you have obtained a License.
- * You can obtain a License by contacting < contact @ kaerus com >. 
- *
+ * Licensed under Apache 2.0 Software License terms, (the "License");
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
 #pragma link "libraries/postrest/db.c"
-#pragma link "libraries/libpq/libpq.so"
+#pragma link "pq"
+#pragma link "event"
+
 #pragma debug
 #define DEBUG
 
 #include <string.h>
 
 #include "gwan.h"
-#include "postrest/libpq-fe.h"
+#include "postgresql/libpq-fe.h"
 #include "postrest/db.h"
 
 int get_list(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
@@ -25,7 +24,7 @@ int get_list(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
         "SELECT datname AS database FROM pg_database "
         "WHERE(datistemplate = false);");
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 int get_tables(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
@@ -41,14 +40,14 @@ int get_tables(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     
     xbuf_free(&query);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 int get_stats(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     int ret = db_send(db,rep,
         "SELECT row_to_json(t) FROM pg_stat_database AS t;");
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 
@@ -56,17 +55,17 @@ int get_users(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     int ret = db_send(db,rep,
         "SELECT to_json(u) FROM pg_catalog.pg_user AS u;");
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 int get_grants(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     int ret = db_send(db,rep,
         "SELECT to_json(g) FROM information_schema.role_table_grants AS g;");
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
-int get_active_idle(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
+int get_active(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     char *state = argv[0];
     char *name = argv[1];
     char asdb[256] = {};
@@ -92,7 +91,7 @@ int get_active_idle(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     
     xbuf_free(&query);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 int get_version(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
@@ -215,7 +214,7 @@ int vacuum_database(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     xbuf_free(&options);
     xbuf_free(&columns);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 int create_database(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
@@ -265,7 +264,7 @@ int create_database(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
 
     xbuf_free(&query);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 int shutdown_database(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
@@ -289,7 +288,7 @@ int shutdown_database(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db)
 
     xbuf_free(&query);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 } 
 
 int delete_database(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
@@ -309,68 +308,24 @@ int delete_database(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     
     xbuf_free(&query);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 int main(int argc, char **argv){
-    int method = get_env(argv, REQUEST_METHOD);
-    xbuf_t *req = get_request(argv);
-    xbuf_t *rep = get_reply(argv);
-    db_t *db = db_session(argv);
-    
-    debug_printf("%s\n", (char *)get_env(argv,REQUEST));
-    
-    
-    if(!db) {
-        return db_error(rep,HTTP_401_UNAUTHORIZED,"authentication failed");
-    }
+    EndpointEntry endpoints[] = {
+        {HTTP_GET, "list", get_list, 0},
+        {HTTP_GET, "tables", get_tables, 0},
+        {HTTP_GET, "stats", get_stats, 0}, 
+        {HTTP_GET, "users", get_users, 0},
+        {HTTP_GET, "grants", get_grants, 0},
+        {HTTP_GET, "active", get_active, 0},
+        {HTTP_GET, "version", get_version, 0},
+        {HTTP_PUT, "vacuum", vacuum_database, 0},
+        {HTTP_PUT, "shutdown", shutdown_database, 0},
+        {HTTP_POST, 0, create_database, 0},
+        {HTTP_DELETE, 0, delete_database, 0},
+    };
 
-    char *q = argv[0];
-            
-    if(!q || q[0] == 0) {
-        return db_error(rep,HTTP_400_BAD_REQUEST,"no such command");
-    }
-    
-    switch(method) {
-        case HTTP_GET: {
-            if(strcmp(q,"list") == 0) {
-                return get_list(argc,argv,req,rep,db);
-            } else if(strcmp(q,"tables") == 0) {
-                return get_tables(argc,argv,req,rep,db);
-            } else if(strcmp(q,"stats") == 0) {
-                return get_stats(argc,argv,req,rep,db);
-            } else if(strcmp(q,"users") == 0) {
-                return get_users(argc,argv,req,rep,db);
-            } else if(strcmp(q,"grants") == 0) {
-                return get_grants(argc,argv,req,rep,db);
-            } else if(strcmp(q,"active") == 0) {
-                return get_active_idle(argc,argv,req,rep,db);
-            } else if(strcmp(q,"idle") == 0) {
-                return get_active_idle(argc,argv,req,rep,db);
-            } else if(strcmp(q,"version") == 0) {
-                return get_version(argc,argv,req,rep,db);
-            }
-            
-            return db_error(rep,HTTP_404_NOT_FOUND,"operation not found");
-        } break;
-        case HTTP_POST: {
-            return create_database(argc,argv,req,rep,db);
-        } break;
-        case HTTP_PUT: {
-            if(strcmp(q,"vacuum") == 0) {
-                return vacuum_database(argc,argv,req,rep,db);
-            } else if(strcmp(q,"shutdown") == 0) {
-                return shutdown_database(argc,argv,req,rep,db);
-            }
-            
-            return db_error(rep,HTTP_404_NOT_FOUND,"operation not found"); 
-        } break;
-        case HTTP_DELETE: {
-            return delete_database(argc,argv,req,rep,db);
-        } break;
-        default: break;
-    }
-
-    return db_error(rep,HTTP_405_METHOD_NOT_ALLOWED,"method not allowed");
+    return exec_endpoint(argc,argv,endpoints,ArrayCount(endpoints));
 }
 

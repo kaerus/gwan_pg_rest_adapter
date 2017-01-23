@@ -32,18 +32,56 @@
 //         To avoid running the optional init.c script, rename it to anything 
 //         else than 'init.c' ('init.c_' used by default, is fine).
 // ============================================================================
+#pragma link "event"
 #include "gwan.h"  // G-WAN API
 #include <stdio.h> // puts()
+#include <stdlib.h>// calloc()
+#include <string.h>// strdup()
+
+#include "postrest/db.h"
+
 
 int main(int argc, char *argv[])
 {
 
-   u8 *query_char = (u8*)get_env(argv, QUERY_CHAR);
-   if(query_char) 
-   {
-      *query_char = '_'; 
-   }
+    u8 *query_char = (u8*)get_env(argv, QUERY_CHAR);
+    if(query_char) 
+    {
+        *query_char = '_'; 
+    }
 
-   return 0;
+    void **server_data = (void **) get_env(argv, US_SERVER_DATA);
+    
+    server_t *server = (server_t *) calloc(1,sizeof(server_t));
+    
+    *server_data = server;        
+    
+    server->sessions = (kv_t *)calloc(1,sizeof(kv_t));
+    server->config = (kv_t *)calloc(1,sizeof(kv_t));
+        
+    kv_init(server->sessions, "sessions", 0, 0, 0, 0);
+    kv_init(server->config, "configuration", 0, 0, 0, 0);
+
+    char *dbhost = strdup("127.0.0.1:5432");
+
+    // add host config
+    kv_add(server->config,&(kv_item){
+            .key = strdup("dbhost"),
+                .klen = 6,
+                .val = (void *) dbhost,
+                .flags = 0
+                });
+
+    char *connstr = strdup("postgres://%s:%s@%s/%s");
+
+    kv_add(server->config,&(kv_item){
+            .key = strdup("dbconn"),
+                .klen = 6,
+                .val = (void *) connstr,
+                .flags = 0
+                });
+
+    
+    return 0;
 }
 

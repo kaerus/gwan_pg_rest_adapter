@@ -14,7 +14,8 @@
 /* Disable the servlet by removing this source file...      */
 
 #pragma link "libraries/postrest/db.c"
-#pragma link "libraries/libpq/libpq.so"
+#pragma link "pq"
+#pragma link "event"
 
 #include <string.h>
 #include <stdlib.h>
@@ -118,7 +119,7 @@ int get_query(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t * db) {
     http_header(HEAD_ADD, headers.ptr, headers.len, argv);
     xbuf_free(&headers);  
     
-    return db_response(db,rep,argv);
+    return 0;
 }
 
 int post_query(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t * db) {
@@ -170,29 +171,16 @@ int post_query(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t * db) {
 
     jsn_free(json);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
+
 int main(int argc, char **argv){
-    int method = get_env(argv, REQUEST_METHOD);
-    xbuf_t *req = get_request(argv);
-    xbuf_t *rep = get_reply(argv);
-    db_t *db = db_session(argv);
-    
-    if(!db) {
-        return db_error(rep,HTTP_401_UNAUTHORIZED,"authentication failed");
-    }
+    EndpointEntry endpoints[] = {
+        {HTTP_GET, 0, get_query, 0},
+        {HTTP_POST, 0, post_query, 0},
+    };
 
-    switch(method) {
-        case HTTP_GET: {
-            return get_query(argc,argv,req,rep,db);
-        } break;
-        case HTTP_POST: {
-            return post_query(argc,argv,req,rep,db);
-        } break;
-        default: break;
-    }
-
-    return db_error(rep,HTTP_405_METHOD_NOT_ALLOWED,"unsupported method");
+    return exec_endpoint(argc,argv,endpoints,ArrayCount(endpoints));
 }
 

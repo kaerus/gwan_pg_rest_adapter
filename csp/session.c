@@ -2,30 +2,31 @@
  * Copyright (c) 2015 Kaerus Software AB, all rights reserved.
  * Author Anders Elo <anders @ kaerus com>.
  *
- * Licensed under Propreitary Software License terms, (the "License");
- * you may not use this file unless you have obtained a License.
- * You can obtain a License by contacting < contact @ kaerus com >. 
- *
+ * Licensed under Apache 2.0 Software License terms, (the "License");
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
 #pragma link "libraries/postrest/db.c"
-#pragma link "libraries/libpq/libpq.so"
+#pragma link "pq"
+#pragma link "event"
 
 #define DEBUG
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <arpa/inet.h>
 
 #include "gwan.h"
-#include "postrest/libpq-fe.h"
+#include "postgresql/libpq-fe.h"
 #include "postrest/db.h"
 
 static prnd_t rnd;
 static int once = 0;
 
-int session_get(int argc, char **argv, xbuf_t *req, xbuf_t *rep) {
+
+
+int session_get(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     
     if(argc < 2) return db_error(rep,400,"to few parameters");
     
@@ -48,20 +49,25 @@ int session_get(int argc, char **argv, xbuf_t *req, xbuf_t *rep) {
 }
 
 
-int session_login(int argc, char **argv, xbuf_t *req, xbuf_t *rep) {
+int session_login(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
  
     char *database;
     char *schema;
     char *username;
     char *password;
-    db_t *db = 0;
     
     // already in session
     if(db) {        
         return 200;
     }
+
+    server_t *server = *((server_t**) get_env(argv, US_SERVER_DATA));
+
+    if(!server){
+        return db_error(rep,500,"undefined server data");        
+    }
     
-    char *host = *((char **) get_env(argv, US_HANDLER_DATA));
+    char *host = (char *) kv_get(server->config,"dbhost",6);
     
     if(!host) {
         return db_error(rep,HTTP_502_BAD_GATEWAY,"missing database configuration");
@@ -118,17 +124,18 @@ int session_login(int argc, char **argv, xbuf_t *req, xbuf_t *rep) {
     }
     
     schema = sch ? sch->string : "public";
-    
-    char connstr[256];
+
+    char connstr[128] = {};
     char session_key[128] = {};
-    
+
+    char *dbconn = (char *) kv_get(server->config,"dbconn",6);
+
     // todo: get connection url from global configuration
-    s_snprintf(connstr,sizeof(connstr)-1, "postgres://%s:%s@%s/%s", 
+    s_snprintf(connstr,sizeof(connstr)-1, dbconn, 
         username, password, host, database);
-        
-    debug_printf("connection(%s)\n", connstr);
+
     
-    // note: this is a blocking / synchrounous request
+    // note: this is a blocking / synchronous request
     PGconn *conn = PQconnectdb(connstr);
 
     int status = PQstatus(conn);
@@ -148,7 +155,7 @@ int session_login(int argc, char **argv, xbuf_t *req, xbuf_t *rep) {
 	debug_printf("client ip: %s\n",argv[-1]);
 	// note: only ipv4
 	struct sockaddr_in sa;
-	int s = inet_pton(AF_INET, (remote ? remote : argv[-2]), &(sa.sin_addr));
+	int s = inet_pton(AF_INET, (remote ? remote : argv[-1]), &(sa.sin_addr));
 	if (s <= 0) {
 	    if (s == 0) return db_error(rep,400,"x-forwarded-for invalid address");
 	    else return db_error(rep,500,0);
@@ -178,12 +185,11 @@ int session_login(int argc, char **argv, xbuf_t *req, xbuf_t *rep) {
         db->port = PQport(conn);
         db->options = PQoptions(conn);
         db->schema = strdup(schema);
-        db->timeout = 600*1000;
-        
-        session_t *sessions = *((session_t**) get_env(argv, US_SERVER_DATA));
+        db->timestamp = getms();
+        db->timeout = db->timestamp + DB_SESSION_TIMEOUT;
         
         // store into user session
-        kv_add(sessions, &(kv_item){
+        kv_add(server->sessions, &(kv_item){
             .key = db->skey,
             .klen = strlen(db->skey),
             .val = (void *) db,
@@ -213,13 +219,7 @@ int session_login(int argc, char **argv, xbuf_t *req, xbuf_t *rep) {
 }
 
 
-int session_logout(int argc, char **argv, xbuf_t *req, xbuf_t *rep) {
-    
-    db_t *db = db_session(argv);
-    
-    if(!db){
-        return db_error(rep,403,"logout attempt from unauthorized session");
-    }
+int session_logout(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     
     xbuf_xcat(rep,"{\"authorization\":null}");
     
@@ -230,25 +230,11 @@ int session_logout(int argc, char **argv, xbuf_t *req, xbuf_t *rep) {
 
 
 int main(int argc, char **argv){
-    int method = get_env(argv, REQUEST_METHOD);
-    xbuf_t *req = get_request(argv);
-    xbuf_t *rep = get_reply(argv);
+    EndpointEntry endpoints[] = {
+        {HTTP_GET, 0, session_get, EP_PERMIT_UNAUTH},
+        {HTTP_POST, 0, session_login, EP_PERMIT_UNAUTH},
+        {HTTP_DELETE, 0, session_logout, 0},
+    };
     
-    switch(method) {
-        case HTTP_GET: { 
-            return session_get(argc,argv,req,rep);
-        } break;
-        case HTTP_POST: {
-            return session_login(argc,argv,req,rep);
-        } break;
-        case HTTP_DELETE: {
-             return session_logout(argc,argv,req,rep);
-        } break;
-        case HTTP_PUT: {
-           
-        } break;
-        default: break;
-    }
-    
-    return db_error(rep,HTTP_405_METHOD_NOT_ALLOWED,"method not allowed");
+    return exec_endpoint(argc,argv,endpoints,ArrayCount(endpoints));
 }

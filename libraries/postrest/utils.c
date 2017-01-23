@@ -1,12 +1,67 @@
+/* 
+ * Copyright (c) 2015 Kaerus Software AB, all rights reserved.
+ * Author Anders Elo <anders @ kaerus com>.
+ *
+ * Licensed under Apache 2.0 Software License terms, (the "License");
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
+#include <stdlib.h>
+#include <ctype.h>
+
+
+/*
+ * Determine whether a given character is a space character according to
+ * http://tools.ietf.org/html/draft-ietf-httpbis-p1-messaging#section-3.2.6
+ */
+#define IS_SPACE(c) (c == ' ' || c == '\t')
+#define IS_ALPHA(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) 
+#define IS_NUMBER(c) (c >= '0' && c <= '9')
+
+/* 
+ * Http header allowed characters as per RFC 2616 
+ * Regexp: /^[a-zA-Z0-9_!#$%&'*+.^`|~-]+$/               
+ */ 
+
+/*
+ * Determine whether a given character is a token character according to
+ * http://tools.ietf.org/html/draft-ietf-httpbis-p1-messaging#section-3.2.6
+ *      tchar          = "!" / "#" / "$" / "%" / "&" / "'" / "*"
+ *                    /  "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
+ *                    / DIGIT / ALPHA
+ */
+#define IS_TOKEN(c) ( \
+        IS_ALPHA(c)   \
+    || IS_NUMBER(c)   \
+    || c == '!'       \
+    || c == '#'       \
+    || c == '$'       \
+    || c == '%'       \
+    || c == '&'       \
+    || c == 0x27      \
+    || c == '*'       \
+    || c == '+'       \
+    || c == '-'       \
+    || c == '.'       \
+    || c == '^'       \
+    || c == '_'       \
+    || c == '`'       \
+    || c == '|'       \
+    || c == '~'       \
+    )
+
+// ASCII hex values
+#define ASCII_SQ    0x27 // single quote
+#define ASCII_SPACE 0x20 // space
 
 /* removes double quotes and control codes from string */
 char *unquote(char *string){
     int length = strlen(string);
     
     for(int i = 0; i < length; i++){
-        if(string[i] == '"') string[i] = 0x27; // replace with a single quote
-        else if(string[i] < 0x20) string[i] = '.'; // replace control codes with a dot.
+        if(string[i] == '"') string[i] = ASCII_SQ;          // replaces double quote with single quote
+        else if(string[i] < ASCII_SPACE) string[i] = '^';   // replaces control codes with ^.
     }
     
     return string;
@@ -56,6 +111,41 @@ int strword(char *string){
     return 1;
 }
 
+int isString(char *string){
+    if(!string) return 0;
+
+    int len = strlen(string);
+
+    if(len <= 0) return 0;
+
+    char c;
+
+    for(int i = 0; i < len; i++){
+	    c = string[i];
+
+	    // reject: nonascii ' ;
+	    if(c < 0x20 || c == 0x27 || c == 0x3b) return 0;
+    }
+
+    return 1;
+}
+
+
+int isToken(char *string){
+    if(!string) return 0;
+
+    int len = strlen(string);
+
+    char c;
+
+    for(int i = 0; i < len; i++){
+        c = string[i];
+        if(!IS_TOKEN(c) ) return 0;
+    }
+
+    return 1;
+}
+
 // validate uuid string
 // aa196922-4471-4c1f-aa4a-f8d7bdb39bff
 int isUUID(char *string){
@@ -68,12 +158,33 @@ int isUUID(char *string){
     char c;
     
     for(int i = 0; i < len; i++){
-	c = string[i];
-	if(c != 0x2d &&
-	   ((c < 0x30 || c > 0x66) ||
-	    (c > 0x39 && c < 0x61))) {
-	    return 0;
-	}
+	    c = string[i];
+	    
+	    if(((c < '0' || c > 'f') ||
+	        (c > '9' && c < 'a') || 
+	        (c != '-'))) return 0;
+    }
+
+    return 1;
+}
+
+int isBase64(char *string){
+    if(!string) return 0;
+
+    int len = strlen(string);
+
+    if(len <= 0) return 0;
+
+    char c;
+
+    for(int i = 0; i < len; i++){
+	    c = string[i];
+
+	    if(!( IS_ALPHA(c)   || 
+	          IS_NUMBER(c)  || 
+	          c == '+'      || 
+	          c == '/'      || 
+	          c == '=') ) return 0;
     }
 
     return 1;
@@ -81,83 +192,132 @@ int isUUID(char *string){
 
 /* check that string is a valid csv list */
 int strcsv(char *string){
+    if(!string) return 0;
+
+    int len = strlen(string);
+
+    if(len <= 0) return 0;
+
     char c;
     
     for(int i = 0; i < strlen(string); i++){
         c = string[i];
         
-        if(c < 0x2c || c > 0x7a || (c > 0x3a && c < 0x40) || (c > 0x5a && c < 0x61)) {
-            return 0;
-        }
+        if( c < 0x2c                || 
+            c > 0x7a                || 
+            (c > 0x3a && c < 0x40)  || 
+            (c > 0x5a && c < 0x61)) return 0;
     }
     
     return 1;
 }
 
 int strdigit(char *string){
+    if(!string) return 0;
+
+    int len = strlen(string);
+
+    if(len <= 0) return 0;
+
     char c;
     
     for(int i = 0; i < strlen(string); i++){
         c = string[i];
         
-        if(c < 0x30 || c > 0x39) {
-            return 0;
-        }
+        if(c < 0x30 || c > 0x39) return 0;
     }
 
     return 1;
 }
 
-
+void url_decode(char *dst, const char *src)
+{
+    char a, b;
+    while (*src) {
+	    if ((*src == '%') &&
+	        ((a = src[1]) && (b = src[2])) &&
+	        (isxdigit(a) && isxdigit(b))) {
+	        if (a >= 'a')
+		    a -= 'a'-'A';
+	        if (a >= 'A')
+		    a -= ('A' - 10);
+	        else
+		    a -= '0';
+	        if (b >= 'a')
+		    b -= 'a'-'A';
+	        if (b >= 'A')
+		    b -= ('A' - 10);
+	        else
+		    b -= '0';
+	        *dst++ = 16*a+b;
+	        src+=3;
+	    } else {
+	        *dst++ = *src++;
+	    }
+    }
+    *dst++ = '\0';
+}
 
 xbuf_t *get_request(char **argv) {
     return (xbuf_t *) get_env(argv,READ_XBUF);
 }
 
+void stringToLowercase(char *string, int len){
+    if(!len) len = strlen(string);
+    
+    for(int i = 0; i < len; i++){
+        string[i] = tolower(string[i]);
+    }
+}
+
 /* parse and truncate http headers */
 int get_headers(xbuf_t *req, http_headers_t *headers, int maxh){
-    char header[257] = {0};
-    char *name, *value, *delim;
+    char *delim, *name ,*value;
     
     u32 len = req->len;
-    char c1, c2, *s1, *s2;
+    char *p1, *p2;
     
-    int count = 0, hlen;
+    int count = 0, hlen, nlen, vlen;
     
-    s1 = req->ptr;
+    p1 = req->ptr;
    
     for(int p = 0; p < len; p++) {
-        s2 = req->ptr + p;
-        c1 = *s2;
-        c2 = *(s2 + 1);
-        if(c1 == '\r' && c2 == '\n'){
-            if(maxh == 0) return -1; // reached headers limit
-            hlen = s2 - s1;
-            
-            if(hlen <= 0 || count > 15) break;
-            if(hlen > sizeof(header) - 2) hlen = 255;
-            
-            strncpy(header,s1,hlen);
-            header[hlen] = 0;
-            
-            name = header;
-            delim  = strchr(header,':');
-            if(delim){
-                header[delim-name] = 0;
-                value = delim + 1;
-                if(*value == ' ') value++;
-                // todo: should we bail out on to long header name/value?
-                strncpy(headers->name, name, sizeof(headers->name)-1);
-                strncpy(headers->value, value, sizeof(headers->value)-1);
-                headers++;
-                maxh--;
+        p2 = req->ptr + p;
+        if(*(p2+1) == '\r' && *(p2+2) == '\n'){
+            hlen = p2 - p1;           
+            if(hlen > 0){
+
+                name = p1;
+                delim = strchr(name,':');
+                if(delim){                                        
+                    // note: trunkates header name and values
+                    nlen = MIN(delim - name,MAX_HEADER_NAME - 1);
+                    memcpy(headers->name, name, nlen);
+                    headers->name[nlen] = 0;
+                    stringToLowercase(headers->name,nlen);
+
+                    value = delim + 1;                    
+                    while(*value && (*value == ' ' || *value == '\t')) value++;
+                    
+                    if(*value) {
+                        vlen = MIN(p2-value+1,MAX_HEADER_VALUE - 1);
+                        memcpy(headers->value, value, vlen);
+                        headers->value[vlen] = 0;
+                    }
+                    
+                    headers++;
+                    count++;
+
+                    // reached headers limit
+                    if(count >= maxh) return count; 
+                }
             }
-            count++;
-            s1 = s2 + 2;
+            p1 = p2+3;
+            p+=2;
         }
     }
     
-    return 0;
+    return count;
 }
 
 int get_header_value(http_headers_t *headers, char *name, char **value){
@@ -212,3 +372,44 @@ int bad_request(char **argv, int code, char *message){
       
     return status;
 }
+
+int exec_endpoint(int argc, char **argv, EndpointEntry endpoints[], int count){
+    xbuf_t *req = get_request(argv);
+    xbuf_t *rep = get_reply(argv);
+    
+    db_t *db = db_session(argv);
+
+    int method = get_env(argv, REQUEST_METHOD);
+        
+    char *cmd = argv[0];   
+    EndpointEntry *entry = 0;    
+    bool method_allowed = false;
+
+    debug_printf("endpoint count %d\n", count);
+    
+    for(int index = 0; index < count; index++){
+        entry = &endpoints[index];
+        
+        if(entry->method == method) {
+            if(entry->cmd == 0 || (cmd && cmd[0] && strcmp(cmd,entry->cmd) == 0)){
+                if(!db && !(entry->flags & EP_PERMIT_UNAUTH))
+                    return db_error(rep,HTTP_401_UNAUTHORIZED,"unauthorized access");
+
+                int http_error = entry->endpoint(argc,argv,req,rep,db); 
+
+                if(!http_error){
+                    http_error = db_response(db,rep,argv);                    
+                }
+                
+                return http_error;
+            }
+            method_allowed = true;
+        }
+    }
+
+    if(!method_allowed)
+        return db_error(rep,HTTP_405_METHOD_NOT_ALLOWED,"method not allowed");
+
+    return db_error(rep,HTTP_404_NOT_FOUND,"endpoint not found");
+} 
+

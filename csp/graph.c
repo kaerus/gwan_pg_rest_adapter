@@ -2,15 +2,13 @@
  * Copyright (c) 2015 Kaerus Software AB, all rights reserved.
  * Author Anders Elo <anders @ kaerus com>.
  *
- * Licensed under Propreitary Software License terms, (the "License");
- * you may not use this file unless you have obtained a License.
- * You can obtain a License by contacting < contact @ kaerus com >. 
- *
+ * Licensed under Apache 2.0 Software License terms, (the "License");
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
 #pragma link "libraries/postrest/db.c"
-#pragma link "libraries/libpq/libpq.so"
+#pragma link "pq"
+#pragma link "event"
 #pragma debug
 #define DEBUG
 
@@ -24,10 +22,10 @@ int get_graph(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     return HTTP_501_NOT_IMPLEMENTED;
 }
 
-/* GET _graph/label/:graph/:name/:[to|from]
- *
+/* GET _graph/node/:graph/:label/:[to|from]
+ * Get nodes with an edge label
  */
-int get_label(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
+int get_node(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     char *graph = argv[1];
     
     if(!strword(graph)) {
@@ -62,11 +60,11 @@ int get_label(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     xbuf_init(&query);
 
     xbuf_xcat(&query,
-        "SELECT id, xmin AS rev, label, document AS json_doc "
-        "FROM %s.%s.%s_graph_edges AS E "
-        "INNER JOIN %.%.%._graph_collection AS N "
-        ,db->name, db->schema, graph
-        ,db->name, db->schema, graph);
+              "SELECT id, xmin AS rev, label, document AS json_doc "
+              "FROM %s.%s.%s_graph_edges AS E "
+              "INNER JOIN %.%.%._graph_collection AS N "
+              ,db->name, db->schema, graph
+              ,db->name, db->schema, graph);
 
     if(!direction || strcmp(direction,"from") != 0){
         xbuf_xcat(&query,
@@ -82,14 +80,13 @@ int get_label(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     
     xbuf_free(&query);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 /* GET _graph/adjacent/:graph/:uuid
  *
  */
 int get_adjacent(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
-
 
 // get adjacent nodes
 // select id, name, prop, label from mygraph_graph_edges as E 
@@ -122,16 +119,17 @@ int get_adjacent(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     if(argc > 3){
         label = argv[3];
 
-	if(!strword(label)){
-	    return db_error(rep,422,"[label] must be an word <string>");
+	if(!isString(label)){
+	    return db_error(rep,422,"[label] must be a <string>");
 	}
     }
     
     xbuf_t query;
     xbuf_init(&query);
 
+    // todo: consider creating option not including json_doc 
     xbuf_xcat(&query,
-	      "SELECT id, label, name "
+	      "SELECT id, label, name, document AS json_doc "
 	      "FROM %s.%s.%s_graph_edges AS E "
 	      "INNER JOIN %s.%s.%s_graph_collection AS N "
 	      ,db->name, db->schema, graph
@@ -151,7 +149,7 @@ int get_adjacent(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     
     xbuf_free(&query);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 
 }
 
@@ -287,7 +285,7 @@ int traverse(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     
     xbuf_free(&query);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 
 }
 
@@ -319,21 +317,21 @@ int delete_graph(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     xbuf_init(&query);
     
     xbuf_xcat(&query,
-        "DROP TABLE %s_graph_edges, %s_graph_collection %s;"
-        ,table, table, drop_method);
+              "DROP TABLE %s_graph_edges, %s_graph_collection %s;"
+              ,table, table, drop_method);
 
     int ret = db_send(db,rep,query.ptr);
     
     xbuf_free(&query);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 int create_graph(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     /* create graph
-        {
-            "name": "<name>"
-        }
+       {
+       "name": "<name>"
+       }
     */
     
     char *entity = (char*)get_env(argv, REQ_ENTITY);
@@ -386,18 +384,18 @@ int create_graph(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
 	      "ON UPDATE CASCADE ON DELETE CASCADE,"
 	      "b uuid REFERENCES %s_graph_collection(id) "
 	      "ON UPDATE CASCADE ON DELETE CASCADE,"
-	      "label VARCHAR(16),"
+	      "label text,"
 	      "UNIQUE (a,b),"
 	      "CONSTRAINT %s_graph_prevent_self CHECK (a <> b) );"
 	      , graph, graph, graph, name->string);
     // "PRIMARY KEY (a,b),"
     xbuf_xcat(&query,
-        "CREATE INDEX a_%s_idx ON %s_graph_edges(a);"
-        , name->string, graph);
+              "CREATE INDEX a_%s_idx ON %s_graph_edges(a);"
+              , name->string, graph);
           
     xbuf_xcat(&query,
-        "CREATE INDEX b_%s_idx ON %s_graph_edges(b);"
-        , name->string, graph);
+              "CREATE INDEX b_%s_idx ON %s_graph_edges(b);"
+              , name->string, graph);
     
     jsn_free(json);
     
@@ -405,7 +403,7 @@ int create_graph(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     
     xbuf_free(&query);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 /* POST _graph/edge/:graph
@@ -529,7 +527,7 @@ int create_edge(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     xbuf_free(&query);  
     jsn_free(json);
 
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 /* DELETE _graph/edge/:graph
@@ -658,56 +656,22 @@ int delete_edge(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     xbuf_free(&query);  
     jsn_free(json);
 
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 
 }
 
 int main(int argc, char **argv){
-    int method = get_env(argv, REQUEST_METHOD);
-    xbuf_t *req = get_request(argv);
-    xbuf_t *rep = get_reply(argv);
-    db_t *db = db_session(argv);
-    
-    if(!db) {
-        return db_error(rep,HTTP_401_UNAUTHORIZED,"authentication failed");
-    }
+    EndpointEntry endpoints[] = {
+        {HTTP_GET, "adjacent", get_adjacent, 0},
+        {HTTP_GET, "traverse", traverse, 0},
+        {HTTP_GET, "node", get_node, 0}, 
+        {HTTP_POST, "graph", create_graph, 0},
+        {HTTP_POST, "edge", create_edge, 0},
+        {HTTP_DELETE, "graph", delete_graph, 0},
+        {HTTP_DELETE, "edge", delete_edge, 0},
+    };
 
-    char *q = argv[0];
-            
-    if(!q || q[0] == 0) {
-        return db_error(rep,HTTP_400_BAD_REQUEST,"no such command");
-    }
-
-    switch(method) {
-        case HTTP_GET: {
-            if(strcmp(q,"adjacent") == 0){
-                return get_adjacent(argc,argv,req,rep,db);
-            } else if(strcmp(q,"traverse") == 0){
-		return traverse(argc,argv,req,rep,db);
-	    } else if(strcmp(q,"label") == 0){
-                return get_label(argc,argv,req,rep,db);
-            } 
-        } break;
-    	case HTTP_POST: {
-	    if(strcmp(q,"edge") == 0) {
-		return create_edge(argc,argv,req,rep,db);
-	    }
-            else if(strcmp(q,"graph") == 0) {
-                return create_graph(argc,argv,req,rep,db);
-            } 
-        } break;
-        case HTTP_DELETE: {
-            if(strcmp(q,"graph") == 0) {
-                return delete_graph(argc,argv,req,rep,db);
-            } else if(strcmp(q,"edge") == 0) {
-                return delete_edge(argc,argv,req,rep,db);
-            }
-        } break;
-        case HTTP_PUT: {
-        
-        } break;
-        default: break;
-    }
-    
-    return db_error(rep,HTTP_405_METHOD_NOT_ALLOWED,"method not allowed");
+    return exec_endpoint(argc,argv,endpoints,ArrayCount(endpoints));
 }
+
+

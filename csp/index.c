@@ -2,15 +2,13 @@
  * Copyright (c) 2015 Kaerus Software AB, all rights reserved.
  * Author Anders Elo <anders @ kaerus com>.
  *
- * Licensed under Propreitary Software License terms, (the "License");
- * you may not use this file unless you have obtained a License.
- * You can obtain a License by contacting < contact @ kaerus com >. 
- *
+ * Licensed under Apache 2.0 Software License terms, (the "License");
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
 #pragma link "libraries/postrest/db.c"
-#pragma link "libraries/libpq/libpq.so"
+#pragma link "pq"
+#pragma link "event"
 
 #include <string.h>
 
@@ -79,7 +77,7 @@ int delete_index(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     
     xbuf_free(&query);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
 int create_index(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
@@ -128,40 +126,17 @@ int create_index(int argc, char **argv, xbuf_t *req, xbuf_t *rep, db_t *db) {
     xbuf_free(&query);
     jsn_free(json);
     
-    return ret ? ret : db_response(db,rep,argv);
+    return ret;
 }
 
-int main(int argc, char **argv){
-    int method = get_env(argv, REQUEST_METHOD);
-    xbuf_t *req = get_request(argv);
-    xbuf_t *rep = get_reply(argv);
-    db_t *db = db_session(argv);
-    
-    if(!db) {
-        return db_error(rep,HTTP_401_UNAUTHORIZED,"authentication failed");
-    }
 
-    char *q = argv[0];
-            
-    if(!q || q[0] == 0) {
-        return db_error(rep,HTTP_400_BAD_REQUEST,"no such command");
-    }
-    
-    switch(method) {
-        case HTTP_GET: {            
-           return get_index(argc,argv,req,rep,db);
-        } break;
-        case HTTP_POST: {
-            return create_index(argc,argv,req,rep,db);
-        } break;
-        case HTTP_DELETE: {
-            return delete_index(argc,argv,req,rep,db);
-        } break;
-        case HTTP_PUT: {
-            return update_index(argc,argv,req,rep,db);
-        } break;
-        default: break;
-    }
-    
-    return db_error(rep,HTTP_405_METHOD_NOT_ALLOWED,"method not allowed");
+int main(int argc, char **argv){
+    EndpointEntry endpoints[] = {
+        {HTTP_GET, 0, get_index, 0},
+        {HTTP_PUT, 0, update_index, 0},
+        {HTTP_POST, 0, create_index, 0},
+        {HTTP_DELETE, 0, delete_index, 0},
+    };
+
+    return exec_endpoint(argc,argv,endpoints,ArrayCount(endpoints));
 }
